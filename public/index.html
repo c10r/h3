@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>H3 Viz</title>
+
+    <!-- Bootstrap -->
+    <link
+        rel="stylesheet"
+        href="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/css/bootstrap.min.css"
+        integrity="sha384-ggOyR0iXCbMQv3Xipma34MD+dH/1fQ784/j6cY/iJTQUOhcWr7x9JvoRxT2MZw1T"
+        crossorigin="anonymous" />
+
+    <!-- Mapbox -->
+    <script src='https://api.mapbox.com/mapbox-gl-js/v1.4.1/mapbox-gl.js'></script>
+    <link href='https://api.mapbox.com/mapbox-gl-js/v1.4.1/mapbox-gl.css' rel='stylesheet' />
+  </head>
+  <body>
+    <div class='container-fluid'>
+        <div class='input-group justify-content-md-center mt-3'>
+            <div class='input-group-prepend'>
+                <span class='input-group-text' id='h3-tile'>H3 Tiles</span>
+            </div>
+            <input
+                autofocus
+                id='h3-tile-input'
+                type='text'
+                class='form-control col-sm-2'
+                placeholder='87283472bffffff, 87283472affffff, ...'
+                aria-label='H3 Tile'
+                aria-describedby='h3-tile' />
+            <div class='input-group-append'>
+                <button
+                    id='h3-search'
+                    class='btn btn-outline-secondary'
+                    type='button'
+                >Search</button>
+            </div>
+        </div>
+        <div class='input-group justify-content-md-center mt-3'>
+            <div class='input-group-prepend'>
+                <span class='input-group-text' id='h3-zoom-level'>H3 Zoom Level</span>
+            </div>
+            <select class='form-control col-sm-1' id='h3-zoom-level-select'>
+                <option>1</option>
+                <option>2</option>
+                <option>3</option>
+                <option>4</option>
+                <option>5</option>
+                <option>6</option>
+                <option>7</option>
+                <option>8</option>
+                <option>9</option>
+                <option>10</option>
+                <option>11</option>
+                <option>12</option>
+                <option>13</option>
+                <option>14</option>
+                <option>15</option>
+            </select>
+            <div class='input-group-append'>
+                <button type='button' class='btn btn-danger' id='h3-polyfill'>Polyfill</button>
+                <button type='button' class='btn btn-outline-secondary' id='h3-export'>Export</button>
+            </div>
+        </div>
+        <div class='row justify-content-md-center mt-3'>
+            <div
+                class='justify-content-md-center'
+                id='map'
+                style='width: 800px; height: 600px;'></div>
+        </div>
+    </div>
+
+    <!-- H3 -->
+    <script src="https://unpkg.com/h3-js"></script>
+
+    <!-- Mapbox JS -->
+    <script>
+        let currentTiles = [];
+
+        mapboxgl.accessToken = 'pk.eyJ1IjoiYzVyIiwiYSI6ImNqdW0zY3U1MzB6bG00M3F2d2N5NGdtMmIifQ.3sTqV6m2SRnTWN1NoV-dsw';
+        const map = new mapboxgl.Map({
+            container: 'map',
+            style: 'mapbox://styles/mapbox/streets-v11'
+        });
+        map.addControl(new mapboxgl.FullscreenControl());
+        map.dragRotate.disable();
+        map.touchZoomRotate.disableRotation();
+        map.setRenderWorldCopies(true);
+
+        function removeAllTiles() {
+            currentTiles.map(tile => {
+                map.removeLayer(tile);
+                map.removeSource(tile);
+            });
+            currentTiles = [];
+        }
+
+        function translateZoomLevel(mapboxZoomLevel) {
+            // Mapbox zoom levels are 0 - 22
+            // https://docs.mapbox.com/help/glossary/zoom-level/
+            // H3 zoom levels are 0 - 15
+            // https://uber.github.io/h3/#/documentation/core-library/resolution-table
+            if (mapboxZoomLevel < 2) {
+                return 0;
+            } else if (mapboxZoomLevel < 4) {
+                return 1;
+            } else if (mapboxZoomLevel < 6) {
+                return 2;
+            } else if (mapboxZoomLevel < 8) {
+                return 3;
+            } else if (mapboxZoomLevel < 10) {
+                return 4;
+            } else if (mapboxZoomLevel == 11) {
+                return 5;
+            } else if (mapboxZoomLevel == 12) {
+                return 6;
+            } else if (mapboxZoomLevel == 13) {
+                return 7;
+            } else if (mapboxZoomLevel == 14) {
+                return 8;
+            } else if (mapboxZoomLevel == 15) {
+                return 9;
+            } else if (mapboxZoomLevel == 16) {
+                return 10;
+            } else if (mapboxZoomLevel == 17) {
+                return 11;
+            } else if (mapboxZoomLevel == 18) {
+                return 12;
+            } else if (mapboxZoomLevel == 19) {
+                return 13;
+            } else if (mapboxZoomLevel == 20) {
+                return 14;
+            } else {
+                return 15;
+            }
+        }
+
+        function renderH3(zoomLevel) {
+            const bounds = map.getBounds();
+            // const h3ZoomLevel = translateZoomLevel(zoomLevel);
+            const polygon = [
+                [bounds._sw.lat, bounds._sw.lng],
+                [bounds._ne.lat, bounds._sw.lng],
+                [bounds._ne.lat, bounds._ne.lng],
+                [bounds._sw.lat, bounds._ne.lng]
+            ];
+            // const hexes = h3.polyfill(polygon, h3ZoomLevel);
+            const hexes = h3.polyfill(polygon, zoomLevel);
+            hexes.map(h3Tile => addH3Tile(h3Tile));
+        }
+
+        function getAngles(points, center) {
+            // Pre calculate the angles as it will be slow in the sort
+            // As the points are sorted from right to left the first point
+            // is the rightmost
+
+            // Starting angle used to reference other angles
+            let startAng;
+            points.forEach(point => {
+                var ang = Math.atan2(point.lon - center.lon, point.lat - center.lat);
+                if (!startAng) { startAng = ang }
+                else {
+                    if (ang < startAng) {
+                        // ensure that all points are clockwise of the start point
+                        ang += Math.PI * 2;
+                    }
+                }
+                point.angle = ang; // add the angle to the point
+            });
+        }
+
+        function addH3Tile(h3Tile) {
+            currentTiles.push(h3Tile);
+
+            // Get center point and H3 Hex
+            const center = h3.h3ToGeo(h3Tile);
+            const h3RawBoundary = h3.h3ToGeoBoundary(h3Tile);
+
+            // Invert (lat, long) to (long, lat) format, per GeoJson and Mapbox
+            const h3InvertedBoundary = h3RawBoundary.map(coordinate => { return { lon: coordinate[1], lat: coordinate[0] } })
+
+            // Sort points in a clockwise order, per GeoJson spec
+            getAngles(h3InvertedBoundary, center);
+            h3InvertedBoundary.sort((a, b) => a.angle - b.angle);
+            const sortedPoints = h3InvertedBoundary.reverse();
+            sortedPoints.unshift(sortedPoints.pop());
+            sortedPoints.push(sortedPoints[0]);
+
+            map.addLayer({
+                "id": `${h3Tile}`,
+                "type": "line",
+                "source": {
+                    "type": "geojson",
+                    "data": {
+                        "type": "Feature",
+                        "properties": {},
+                        "geometry": {
+                            "type": "LineString",
+                            "coordinates": sortedPoints.map(point => [point.lon, point.lat]),
+                        },
+                    },
+                },
+                "layout": {
+                    "line-join": "round",
+                    "line-cap": "round"
+                },
+                "paint": {
+                    "line-color": "#888",
+                    "line-width": 3,
+                }
+            });
+
+            return h3InvertedBoundary;
+        }
+
+        document.getElementById('h3-search').addEventListener('click', function() {
+            removeAllTiles();
+
+            const text = document.getElementById('h3-tile-input').value;
+            if (text) {
+                const h3Ids = text.split(',').map(word => word.trim())
+                const bounds = [];
+
+                for (const id of h3Ids) {
+                    const newBounds = addH3Tile(id);
+                    bounds.push(...newBounds);
+                }
+                map.fitBounds(bounds)
+            }
+        });
+
+        document.getElementById('h3-polyfill').addEventListener('click', function() {
+            removeAllTiles();
+            const zoomLevel = document.getElementById('h3-zoom-level-select').value;
+            renderH3(parseInt(zoomLevel));
+        });
+
+        document.getElementById('h3-export').addEventListener('click', function() {
+            const csvContent = `data:text/csv;charset=utf-8,${currentTiles.join('\n')}`;
+            const encodedUri = encodeURI(csvContent);
+            window.open(encodedUri);
+        });
+    </script>
+  </body>
+</html>
